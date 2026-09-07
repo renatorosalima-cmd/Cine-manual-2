@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Cine Manual A56</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: transparent; /* deixa a câmera nativa (por baixo) aparecer no app instalado */
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: none;
+  }
+
+  #app {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    height: calc(var(--vh, 1vh) * 100);
+    height: 100dvh;
+    background: #000;
+    font-family: -apple-system, sans-serif;
+  }
+
+  .viewfinder { position: absolute; inset: 0; background:
+      radial-gradient(ellipse at 30% 20%, rgba(255,109,0,0.08), transparent 60%),
+      linear-gradient(160deg, #2b2b2b 0%, #111 55%, #1a1a1a 100%); overflow: hidden; }
+  .viewfinder::after { content: ""; position: absolute; inset: 0;
+      background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+      background-size: 33.33% 33.33%; pointer-events: none;
+      opacity: 0; transition: opacity 0.2s; }
+  .viewfinder.grid-on::after { opacity: 1; }
+
+  /* Quando roda dentro do app nativo (Capacitor), o fundo simulado some
+     e a pré-visualização real da câmera nativa aparece por trás da WebView */
+  body.native-app, body.native-app #app, body.native-app .viewfinder {
+    background: transparent !important;
+  }
+  body.native-app .viewfinder::before { display: none; }
+  body.native-app #cameraFeed, body.native-app #cameraMsg { display: none !important; }
+
+  .level-indicator { position: absolute; left: 0; right: 0; top: 50%; z-index: 4;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+  .level-indicator.show { opacity: 1; }
+  .level-indicator .line { flex: 1; height: 1px; background: rgba(0,230,120,0.8); margin: 0 40px; }
+  .level-indicator .dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid rgba(0,230,120,0.9);
+      position: absolute; left: 50%; transform: translateX(-50%); }
+  #cameraFeed { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+  #cameraMsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      text-align: center; padding: 40px; color: rgba(255,255,255,0.55); font-size: 13px; line-height: 1.6; z-index: 2; }
+
+  .status-bar { position: absolute; top: 0; left: 0; right: 0; padding: 14px 20px 0;
+      display: flex; justify-content: space-between; font-size: 13px; color: #eee; z-index: 5; }
+
+  .app-title-badge { position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.4); font-size: 10px; letter-spacing: 3px; z-index: 5; }
+
+  .rec-timer { position: absolute; top: 66px; left: 20px; display: flex; align-items: center; gap: 8px;
+      background: rgba(0,0,0,0.5); padding: 6px 12px; border-radius: 20px; z-index: 5; }
+  .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: #E53935; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: 0.2; } }
+  .rec-timer span { color: #fff; font-family: 'Courier New', monospace; font-size: 14px; letter-spacing: 1px; }
+
+  .top-tools { position: absolute; top: 66px; right: 20px; display: flex; flex-direction: column; gap: 14px; z-index: 5; }
+  .tool-icon { width: 38px; height: 38px; border-radius: 19px; background: rgba(0,0,0,0.45);
+      display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px;
+      font-weight: 700; cursor: pointer; letter-spacing: 0.3px; }
+  .tool-icon.active-state { background: rgba(255,109,0,0.85); color: #fff; }
+  .tool-icon:active { transform: scale(0.92); }
+
+  .manual-fab { position: absolute; width: 52px; height: 52px; border-radius: 50%;
+      background: rgba(0,0,0,0.55); border: 2px solid #FF6D00;
+      display: flex; align-items: center; justify-content: center; color: #FFB300;
+      font-size: 11px; font-weight: 800; letter-spacing: 0.3px; z-index: 20; cursor: pointer;
+      transition: transform 0.2s, background 0.2s; text-align: center; line-height: 1.1; }
+  .manual-fab.open { background: #FF6D00; color: #fff; transform: scale(1.05); }
+  .manual-fab.preset-active { border-color: #FFD54F; box-shadow: 0 0 0 3px rgba(255,213,79,0.25); }
+
+  .quick-chips { position: absolute; display: flex; gap: 8px; z-index: 15; flex-wrap: wrap; }
+  .chip { background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.15); color: #eee;
+      font-size: 11px; font-family: 'Courier New', monospace; padding: 6px 10px; border-radius: 14px;
+      white-space: nowrap; cursor: pointer; }
+  .chip.manual { border-color: #FFB300; color: #FFB300; }
+  .chip:active { transform: scale(0.95); }
+
+  .controls-panel { position: absolute; background: rgba(20,20,20,0.95); backdrop-filter: blur(6px);
+      z-index: 25; transition: transform 0.28s ease; display: flex; flex-direction: column; justify-content: center; }
+  .panel-close { position: absolute; top: 10px; right: 14px; color: #888; font-size: 20px; cursor: pointer; z-index: 2; }
+  .panel-handle { background: #444; border-radius: 2px; }
+  .tabs { display: flex; justify-content: center; }
+  .tab { font-size: 12px; font-weight: 700; letter-spacing: 0.5px; color: #888; padding: 4px 2px 8px;
+      position: relative; cursor: pointer; }
+  .tab.active { color: var(--tab-color, #FFB300); }
+  .tab.active::after { content: ""; position: absolute; bottom: -2px; left: 0; right: 0; height: 2px;
+      background: var(--tab-color, #FFB300); border-radius: 2px; }
+  .value-display { text-align: center; font-family: 'Courier New', monospace; font-size: 22px;
+      font-weight: bold; color: var(--accent, #FFB300); letter-spacing: 1px; }
+  .sim-note { text-align: center; font-size: 9px; color: #666; margin: 2px 0 6px; line-height: 1.4; }
+
+  /* ---------- Dial giratório (estilo ProShot) ---------- */
+  .dial-wrap { display: flex; justify-content: center; align-items: center; margin: 6px 0 12px; }
+  .dial { position: relative; width: 128px; height: 128px; border-radius: 50%; touch-action: none; cursor: grab; }
+  .dial:active { cursor: grabbing; }
+  .dial-track { position: absolute; inset: 0; border-radius: 50%; border: 7px solid #2c2c2c; }
+  .dial-fill { position: absolute; inset: 0; border-radius: 50%;
+      background: conic-gradient(var(--accent, #FFB300) calc(var(--deg, 0deg)), transparent 0deg);
+      -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
+              mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
+      pointer-events: none; }
+  .dial-knob { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #fff;
+      border: 3px solid var(--accent, #FFB300); top: 3px; left: 55px; box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+      pointer-events: none; }
+  .dial-center { position: absolute; inset: 0; margin: auto; width: 8px; height: 8px; border-radius: 50%;
+      background: #3a3a3a; pointer-events: none; }
+  .dial-hint { text-align: center; font-size: 10px; color: #666; margin-bottom: 6px; letter-spacing: 0.5px; }
+
+  .mode-toggle { display: flex; justify-content: center; }
+  .toggle-pill { display: flex; background: #0D0D0D; border-radius: 20px; padding: 3px; border: 1px solid #333; }
+  .toggle-option { padding: 5px 18px; font-size: 11px; font-weight: 700; border-radius: 18px; color: #888; cursor: pointer; }
+  .toggle-option.selected { background: var(--accent, #FF6D00); color: #000; }
+
+  .gallery-thumb { border-radius: 10px; background: linear-gradient(135deg, #444, #222); border: 2px solid #333; cursor: pointer; }
+  .record-btn-wrap { border-radius: 50%; border: 4px solid #FF6D00; display: flex; align-items: center;
+      justify-content: center; cursor: pointer; flex-shrink: 0; }
+  .record-btn { border-radius: 50%; background: #fff; transition: all 0.2s; }
+  .record-btn.recording { border-radius: 8px; background: #E53935; }
+  .switch-cam { border-radius: 50%; background: rgba(255,255,255,0.08); display: flex; align-items: center;
+      justify-content: center; color: #fff; font-size: 19px; cursor: pointer; }
+
+  /* ---------- Barra de zoom ---------- */
+  .zoom-bar { position: absolute; display: flex; z-index: 12;
+      background: rgba(0,0,0,0.45); border-radius: 20px; padding: 3px; gap: 2px; }
+  .zoom-btn { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center;
+      justify-content: center; color: #ccc; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .zoom-btn.active { background: #FFB300; color: #000; }
+
+  /* ---------- Popover genérico (menus dos ícones e das predefinições) ---------- */
+  .popover {
+    position: fixed;
+    background: rgba(24,24,24,0.98);
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 6px;
+    z-index: 60;
+    display: none;
+    min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  .popover.open { display: block; }
+  .popover-title { font-size: 10px; color: #777; letter-spacing: 1px; padding: 6px 10px 2px; }
+  .popover-item { padding: 10px 12px; font-size: 13px; color: #eee; border-radius: 8px; cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .popover-item:active { background: rgba(255,109,0,0.25); }
+  .popover-item.selected { color: #FFB300; font-weight: 700; }
+  .popover-item .desc { font-size: 10px; color: #888; font-weight: 400; }
+  .popover-item.selected .desc { color: #cc8a3a; }
+  #overlayCatch { position: fixed; inset: 0; z-index: 55; display: none; }
+  #overlayCatch.open { display: block; }
+
+  /* ============================================================ RETRATO ============================================================ */
+  .rec-controls-bar { position: absolute; left: 0; right: 0; bottom: 0;
+      padding: 14px 24px calc(24px + env(safe-area-inset-bottom, 0px));
+      display: flex; align-items: center; justify-content: space-between; z-index: 10; }
+  .gallery-thumb, .switch-cam { width: 42px; height: 42px; }
+  .record-btn-wrap { width: 68px; height: 68px; }
+  .record-btn { width: 52px; height: 52px; }
+  .record-btn.recording { width: 28px; height: 28px; }
+
+  .manual-fab { bottom: calc(112px + env(safe-area-inset-bottom, 0px)); left: 20px; }
+  .quick-chips { bottom: calc(112px + env(safe-area-inset-bottom, 0px)); left: 84px; right: 72px; }
+  .zoom-bar { bottom: calc(112px + env(safe-area-inset-bottom, 0px)); right: 20px; left: auto;
+      transform: none; flex-direction: column; }
+
+  .controls-panel { left: 0; right: 0; bottom: 0; border-top: 1px solid #2a2a2a; border-radius: 20px 20px 0 0;
+      padding: 14px 16px calc(12px + env(safe-area-inset-bottom, 0px)); transform: translateY(100%); }
+  .controls-panel.open { transform: translateY(0); }
+  .panel-handle { width: 36px; height: 4px; margin: 0 auto 12px; }
+  .tabs { gap: 22px; margin-bottom: 12px; }
+  .value-display { margin-bottom: 10px; }
+  .dial-wrap { margin: 4px 0 10px; }
+
+  /* ============================================================ PAISAGEM ============================================================ */
+  @media (orientation: landscape) {
+    .rec-controls-bar { left: auto; top: 0; bottom: 0; right: env(safe-area-inset-right, 0px);
+        width: 92px; padding: 20px 0; flex-direction: column; }
+    .manual-fab { bottom: 20px; left: auto; right: calc(112px + env(safe-area-inset-right, 0px)); }
+    .zoom-bar { bottom: auto; top: 50%; transform: translateY(-50%) rotate(0deg); flex-direction: column;
+        right: calc(112px + env(safe-area-inset-right, 0px)); left: auto; }
+    .quick-chips { bottom: auto; top: 20px; left: 20px; right: calc(112px + env(safe-area-inset-right, 0px));
+        flex-direction: column; align-items: flex-start; }
+    .top-tools { top: 20px; right: calc(112px + env(safe-area-inset-right, 0px)); flex-direction: row; }
+    .rec-timer { top: 20px; left: auto; right: calc(112px + env(safe-area-inset-right, 0px)); }
+    .app-title-badge { top: 14px; }
+    .status-bar { padding: 10px calc(112px + env(safe-area-inset-right, 0px)) 0 20px; }
+
+    .controls-panel { top: 0; bottom: 0; right: calc(92px + env(safe-area-inset-right, 0px)); left: auto;
+        width: 250px; border-left: 1px solid #2a2a2a; border-radius: 20px 0 0 20px; padding: 20px 18px;
+        transform: translateX(100%); display: flex; flex-direction: column; justify-content: center; }
+    .controls-panel.open { transform: translateX(0); }
+    .panel-handle { display: none; }
+    .tabs { flex-direction: column; gap: 16px; margin-bottom: 20px; align-items: center; }
+    .value-display { margin-bottom: 18px; font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <div class="viewfinder">
+    <video id="cameraFeed" autoplay playsinline muted></video>
+    <div id="cameraMsg">Toque em "Permitir" quando o navegador<br>pedir acesso à câmera para ver a imagem real aqui.</div>
+
+    <div class="status-bar"><span>9:41</span><span>🔋 100%</span></div>
+    <div class="app-title-badge">CINE MANUAL A56</div>
+
+    <div class="level-indicator" id="levelIndicator">
+      <div class="line"></div>
+      <div class="dot"></div>
+    </div>
+
+    <div class="rec-timer" id="recTimer" style="display:none;">
+      <div class="rec-dot"></div><span id="timerText">00:00:00</span>
+    </div>
+
+    <div class="top-tools">
+      <div class="tool-icon" id="iconQuality">4K</div>
+      <div class="tool-icon" id="iconFlash">⚡</div>
+      <div class="tool-icon" id="iconSettings">⚙️</div>
+    </div>
+  </div>
+
+  <div class="quick-chips" id="quickChips">
+    <div class="chip manual" data-control="iso" id="chipIso">ISO 640</div>
+    <div class="chip" data-control="shutter" id="chipShutter">1/120s</div>
+    <div class="chip" data-control="focus" id="chipFocus">AF</div>
+    <div class="chip" data-control="wb" id="chipWb">WB AUTO</div>
+    <div class="chip" id="chipFps">30 FPS</div>
+    <div class="chip" id="chipStab">EIS PADRÃO</div>
+  </div>
+
+  <div class="manual-fab" id="fabToggle">PRESET</div>
+
+  <div class="controls-panel" id="controlsPanel">
+    <div class="panel-close" id="panelClose">✕</div>
+    <div class="panel-handle"></div>
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-control="iso">ISO</div>
+      <div class="tab" data-control="shutter">OBTURADOR</div>
+      <div class="tab" data-control="focus">FOCO</div>
+      <div class="tab" data-control="wb">WB</div>
+    </div>
+    <div class="value-display" id="valueDisplay">ISO 640</div>
+    <div class="sim-note">Pré-visualização de interface — controle real do sensor exige o app Android nativo</div>
+    <div class="dial-hint">GIRE PARA AJUSTAR</div>
+    <div class="dial-wrap">
+      <div class="dial" id="dial">
+        <div class="dial-track"></div>
+        <div class="dial-fill" id="dialFill"></div>
+        <div class="dial-knob" id="dialKnob"></div>
+        <div class="dial-center"></div>
+      </div>
+    </div>
+    <div class="mode-toggle">
+      <div class="toggle-pill" id="togglePill">
+        <div class="toggle-option" data-mode="auto">AUTO</div>
+        <div class="toggle-option selected" data-mode="manual">MANUAL</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="zoom-bar" id="zoomBar">
+    <div class="zoom-btn" data-zoom="1">1x</div>
+    <div class="zoom-btn" data-zoom="2">2x</div>
+    <div class="zoom-btn" data-zoom="5">5x</div>
+  </div>
+
+  <div class="rec-controls-bar">
+    <label class="gallery-thumb" id="galleryThumb" for="galleryInput"></label>
+    <input type="file" id="galleryInput" accept="image/*,video/*" style="display:none;">
+    <div class="record-btn-wrap" id="recordBtnWrap"><div class="record-btn" id="recordBtn"></div></div>
+    <div class="switch-cam" id="switchCam">⟳</div>
+  </div>
+
+</div>
+
+<div id="overlayCatch"></div>
+<div class="popover" id="popover"></div>
+
+<script>
+  function setViewportHeight() { document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px'); }
+  setViewportHeight();
+  window.addEventListener('resize', setViewportHeight);
+  window.addEventListener('orientationchange', () => setTimeout(setViewportHeight, 200));
+
+  // ---------- Ponte com o plugin nativo (só existe dentro do app instalado) ----------
+  // Quando este HTML roda dentro do Capacitor, window.Capacitor existe e dá acesso
+  // ao plugin nativo CameraManual (Kotlin) que fala de verdade com o Camera2.
+  // Quando roda num navegador comum (ex: GitHub Pages, pra testar a interface),
+  // isNative() é falso e o código cai no modo de simulação via getUserMedia.
+  function isNative() {
+    return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  }
+  function NativeCamera() {
+    return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CameraManual) || null;
+  }
+  if (isNative()) {
+    document.body.classList.add('native-app');
+    const plugin = NativeCamera();
+    if (plugin && plugin.startPreview) plugin.startPreview();
+  }
+
+  const video = document.getElementById('cameraFeed');
+  const cameraMsg = document.getElementById('cameraMsg');
+  let currentStream = null;
+  let currentTrack = null;
+  let currentFacingMode = 'environment';
+  let currentQualityConstraints = {};
+  let zoomCapabilities = null; // {min, max, step} se o navegador/câmera suportar zoom real
+
+  async function startCamera(constraints) {
+    // Dentro do app nativo, quem mostra a câmera é o plugin Kotlin (camada
+    // nativa por baixo da WebView) — não usamos getUserMedia nesse caso.
+    if (isNative()) return;
+    try {
+      // Encerra o stream anterior antes de pedir um novo (evita travar a câmera)
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: Object.assign({ facingMode: { ideal: currentFacingMode } }, constraints || {}),
+        audio: false
+      });
+      currentStream = stream;
+      video.srcObject = stream; video.style.display = 'block'; cameraMsg.style.display = 'none';
+
+      const track = stream.getVideoTracks()[0];
+      currentTrack = track;
+      if (track) {
+        const settings = track.getSettings();
+        console.log('Resolução real da câmera:', settings.width + 'x' + settings.height);
+
+        zoomCapabilities = null;
+        if (track.getCapabilities) {
+          const caps = track.getCapabilities();
+          if (caps && caps.zoom) zoomCapabilities = caps.zoom;
+        }
+        setZoom(zoomLevel, true); // reaplica o zoom atual no novo stream (ex: ao trocar qualidade)
+      }
+    } catch (err) {
+      cameraMsg.textContent = 'Câmera não disponível neste navegador/contexto (' + err.message + '). O resto da interface funciona normalmente.';
+    }
+  }
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) startCamera();
+  else cameraMsg.textContent = 'Este navegador não permite acesso à câmera nesta página.';
+
+  const popover = document.getElementById('popover');
+  const overlayCatch = document.getElementById('overlayCatch');
+
+  function closePopover() {
+    popover.classList.remove('open');
+    popover.style.display = 'none';
+    overlayCatch.classList.remove('open');
+    popover.innerHTML = '';
+  }
+  overlayCatch.addEventListener('click', closePopover);
+
+  function openPopover(trigger, title, items) {
+    popover.innerHTML = '';
+    if (title) {
+      const t = document.createElement('div');
+      t.className = 'popover-title'; t.textContent = title;
+      popover.appendChild(t);
+    }
+    items.forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'popover-item' + (item.selected ? ' selected' : '');
+      el.innerHTML = '<span>' + item.label + (item.selected ? ' ✓' : '') + '</span>' + (item.desc ? '<span class="desc">' + item.desc + '</span>' : '');
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        item.onSelect();
+        if (!item.keepOpen) closePopover();
+      });
+      popover.appendChild(el);
+    });
+
+    // Precisa ficar visível ANTES de medir a largura/altura para posicionar corretamente
+    popover.style.display = 'block';
+    popover.style.left = '-9999px';
+    popover.style.top = '-9999px';
+
+    const rect = trigger.getBoundingClientRect();
+    const pw = popover.offsetWidth || 170;
+    const ph = popover.offsetHeight || 100;
+
+    let left = rect.right - pw;
+    if (left < 8) left = 8;
+    if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+    let top = rect.bottom + 8;
+    if (top + ph > window.innerHeight - 8) top = rect.top - 8 - ph;
+    if (top < 8) top = 8;
+
+    popover.style.left = left + 'px';
+    popover.style.top = top + 'px';
+    popover.classList.add('open');
+    overlayCatch.classList.add('open');
+  }
+
+  const iconQuality = document.getElementById('iconQuality');
+  let quality = '4K';
+  const qualities = [
+    { value: '4K',    desc: '3840x2160', width: 3840, height: 2160 },
+    { value: '1080P', desc: '1920x1080', width: 1920, height: 1080 },
+    { value: '720P',  desc: '1280x720',  width: 1280, height: 720 }
+  ];
+  iconQuality.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openPopover(iconQuality, 'QUALIDADE DE VÍDEO', qualities.map(q => ({
+      label: q.value, desc: q.desc, selected: q.value === quality,
+      onSelect: () => {
+        quality = q.value; iconQuality.textContent = q.value;
+        currentQualityConstraints = { width: { ideal: q.width }, height: { ideal: q.height } };
+        const plugin = NativeCamera();
+        if (plugin && plugin.setQuality) plugin.setQuality({ width: q.width, height: q.height });
+        startCamera(currentQualityConstraints);
+      }
+    })));
+  });
+
+  const iconFlash = document.getElementById('iconFlash');
+  let flashMode = 'off';
+  const flashModes = [
+    { value: 'off',  label: 'DESLIGADO' },
+    { value: 'on',   label: 'LIGADO' },
+    { value: 'auto', label: 'AUTOMÁTICO' }
+  ];
+  iconFlash.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openPopover(iconFlash, 'LANTERNA', flashModes.map(f => ({
+      label: f.label, selected: f.value === flashMode,
+      onSelect: () => {
+        flashMode = f.value; iconFlash.classList.toggle('active-state', flashMode !== 'off');
+        const plugin = NativeCamera();
+        if (plugin && plugin.setFlash) plugin.setFlash({ mode: flashMode });
+      }
+    })));
+  });
+
+  const iconSettings = document.getElementById('iconSettings');
+  const viewfinderEl = document.querySelector('.viewfinder');
+  const levelIndicator = document.getElementById('levelIndicator');
+  const chipStab = document.getElementById('chipStab');
+  let gridOn = true, levelOn = false;
+  let stabilization = 'standard'; // 'off' | 'standard' | 'high'
+  const stabLabels = { off: 'DESLIGADA', standard: 'PADRÃO', high: 'ALTA' };
+
+  function applyGrid() { viewfinderEl.classList.toggle('grid-on', gridOn); }
+  function applyLevel() { levelIndicator.classList.toggle('show', levelOn); }
+  function applyStabChip() {
+    chipStab.textContent = 'EIS ' + stabLabels[stabilization];
+    chipStab.classList.toggle('manual', stabilization !== 'off');
+    chipStab.style.borderColor = stabilization !== 'off' ? '#4DD0E1' : 'rgba(255,255,255,0.15)';
+    chipStab.style.color = stabilization !== 'off' ? '#4DD0E1' : '#eee';
+  }
+
+  function renderSettingsPopover() {
+    openPopover(iconSettings, 'EXIBIÇÃO', [
+      { label: 'Grade', desc: gridOn ? 'LIGADA' : 'DESLIGADA', selected: gridOn, keepOpen: true,
+        onSelect: () => { gridOn = !gridOn; applyGrid(); renderSettingsPopover(); } },
+      { label: 'Nível de horizonte', desc: levelOn ? 'LIGADO' : 'DESLIGADO', selected: levelOn, keepOpen: true,
+        onSelect: () => { levelOn = !levelOn; applyLevel(); renderSettingsPopover(); } },
+      { label: 'Estabilização (EIS)', desc: stabLabels[stabilization] + (stabilization === 'off' ? ' · use assim com gimbal' : ''), selected: stabilization !== 'off', keepOpen: true,
+        onSelect: () => {
+          stabilization = stabilization === 'off' ? 'standard' : stabilization === 'standard' ? 'high' : 'off';
+          applyStabChip();
+          renderSettingsPopover();
+        } }
+    ]);
+  }
+  iconSettings.addEventListener('click', (e) => { e.stopPropagation(); renderSettingsPopover(); });
+  applyGrid();
+  applyLevel();
+  applyStabChip();
+
+  const panel = document.getElementById('controlsPanel');
+  const fab = document.getElementById('fabToggle');
+  document.getElementById('panelClose').addEventListener('click', () => panel.classList.remove('open'));
+
+  function openPanelOn(controlKey) {
+    activeControl = controlKey;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.control === controlKey));
+    panel.classList.add('open');
+    refreshUI();
+  }
+
+  const controls = {
+    iso:     { label: 'ISO',       min: 100,  max: 3200, pos: 0.35, chip: 'chipIso',     color: '#FFD54F', fmt: v => 'ISO ' + Math.round(v) },
+    shutter: { label: 'OBTURADOR', min: 30,   max: 2000, pos: 0.15, chip: 'chipShutter', color: '#4FC3F7', fmt: v => '1/' + Math.round(v) + 's' },
+    focus:   { label: 'FOCO',      min: 0,    max: 100,  pos: 0.9,  chip: 'chipFocus',   color: '#81C784', fmt: v => v > 95 ? '∞' : (0.2 + (v/100)*5).toFixed(1) + 'm' },
+    wb:      { label: 'WB',        min: 2000, max: 9000, pos: 0.45, chip: 'chipWb',      color: '#CE93D8', fmt: v => 'WB ' + Math.round(v) + 'K' }
+  };
+  let activeControl = 'iso';
+  let manualMode = { iso: true, shutter: false, focus: false, wb: false };
+
+  const valueDisplay = document.getElementById('valueDisplay');
+  const dial = document.getElementById('dial');
+  const dialFill = document.getElementById('dialFill');
+  const dialKnob = document.getElementById('dialKnob');
+  const togglePill = document.getElementById('togglePill');
+  const chipFps = document.getElementById('chipFps');
+  const panelEl = document.getElementById('controlsPanel');
+
+  function isLandscape() { return window.matchMedia('(orientation: landscape)').matches; }
+  function realValue(c) { return c.min + c.pos * (c.max - c.min); }
+
+  function refreshUI() {
+    const c = controls[activeControl];
+    const isManual = manualMode[activeControl];
+
+    valueDisplay.textContent = isManual ? c.fmt(realValue(c)) : 'AUTO';
+    panelEl.style.setProperty('--accent', c.color);
+    panelEl.style.setProperty('--tab-color', c.color);
+
+    // Gira o dial de acordo com a posição (0 a 1 = 0 a 300 graus, deixando
+    // um vão embaixo, como um dial analógico de câmera de verdade)
+    const deg = c.pos * 300;
+    dialFill.style.setProperty('--deg', deg + 'deg');
+    const rad = (deg - 150) * Math.PI / 180; // 0 no topo do vão (canto inferior esquerdo do arco)
+    const R = 46;
+    dialKnob.style.left = (64 + R * Math.cos(rad) - 9) + 'px';
+    dialKnob.style.top = (64 + R * Math.sin(rad) - 9) + 'px';
+    dial.style.opacity = isManual ? '1' : '0.45';
+
+    togglePill.querySelectorAll('.toggle-option').forEach(opt => {
+      opt.classList.toggle('selected', (opt.dataset.mode === 'manual') === isManual);
+    });
+
+    Object.keys(controls).forEach(key => {
+      const cc = controls[key];
+      const chipEl = document.getElementById(cc.chip);
+      const man = manualMode[key];
+      chipEl.textContent = man ? cc.fmt(realValue(cc)) : cc.label + ' AUTO';
+      chipEl.classList.toggle('manual', man);
+      chipEl.style.borderColor = man ? cc.color : 'rgba(255,255,255,0.15)';
+      chipEl.style.color = man ? cc.color : '#eee';
+    });
+
+    // Envia o estado atual para o plugin nativo aplicar de verdade no Camera2
+    // (no navegador, sem o plugin, essa chamada simplesmente não faz nada)
+    const plugin = NativeCamera();
+    if (plugin) {
+      if (plugin.setISO) plugin.setISO({ auto: !manualMode.iso, value: Math.round(realValue(controls.iso)) });
+      if (plugin.setShutter) plugin.setShutter({ auto: !manualMode.shutter, fraction: Math.round(realValue(controls.shutter)) });
+      if (plugin.setFocus) plugin.setFocus({ auto: !manualMode.focus, distance: realValue(controls.focus) });
+      if (plugin.setWhiteBalance) plugin.setWhiteBalance({ auto: !manualMode.wb, kelvin: Math.round(realValue(controls.wb)) });
+    }
+  }
+
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => { openPanelOn(tab.dataset.control); });
+  });
+
+  document.querySelectorAll('.chip[data-control]').forEach(chip => {
+    chip.addEventListener('click', () => openPanelOn(chip.dataset.control));
+  });
+
+  togglePill.querySelectorAll('.toggle-option').forEach(opt => {
+    opt.addEventListener('click', () => { manualMode[activeControl] = (opt.dataset.mode === 'manual'); refreshUI(); });
+  });
+
+  let dragging = false;
+  let lastAngle = null;
+
+  function getPoint(e) {
+    if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.changedTouches && e.changedTouches.length) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+  function angleFromCenter(clientX, clientY) {
+    const rect = dial.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    return Math.atan2(clientY - cy, clientX - cx) * 180 / Math.PI;
+  }
+  function onDragStart(e) {
+    dragging = true;
+    const p = getPoint(e);
+    lastAngle = angleFromCenter(p.x, p.y);
+    if (e.cancelable) e.preventDefault();
+  }
+  function onDragMove(e) {
+    if (!dragging) return;
+    const p = getPoint(e);
+    const angle = angleFromCenter(p.x, p.y);
+    let delta = angle - lastAngle;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    lastAngle = angle;
+
+    const c = controls[activeControl];
+    // Sensibilidade reduzida: precisa de bem mais giro pra percorrer toda a
+    // faixa, dando controle fino (antes bastava quase 2 voltas, agora ~6-7)
+    c.pos = Math.min(1, Math.max(0, c.pos + delta / 2400));
+    manualMode[activeControl] = true;
+    refreshUI();
+    if (e.cancelable) e.preventDefault();
+  }
+  function onDragEnd() { dragging = false; lastAngle = null; }
+
+  dial.addEventListener('touchstart', onDragStart, { passive: false });
+  dial.addEventListener('mousedown', onDragStart);
+  window.addEventListener('touchmove', onDragMove, { passive: false });
+  window.addEventListener('touchend', onDragEnd);
+  window.addEventListener('touchcancel', onDragEnd);
+  window.addEventListener('mousemove', onDragMove);
+  window.addEventListener('mouseup', onDragEnd);
+
+  const presets = {
+    CINEMA: { desc: '24fps · obturador 180°', fps: '24 FPS', values: { iso: 0.25, shutter: 0.02, focus: 0.6, wb: 0.4 },
+      manual: { iso: true, shutter: true, focus: false, wb: true } },
+    'SLOW MOTION': { desc: '120fps · alta velocidade', fps: '120 FPS', values: { iso: 0.5, shutter: 0.12, focus: 0.9, wb: 0.45 },
+      manual: { iso: true, shutter: true, focus: false, wb: false } }
+  };
+  let currentPreset = null;
+
+  fab.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const items = [
+      { label: 'PADRÃO', desc: 'Volta ao automático · 30fps', selected: currentPreset === null,
+        onSelect: () => resetToDefault() }
+    ].concat(Object.keys(presets).map(name => ({
+      label: name, desc: presets[name].desc, selected: currentPreset === name,
+      onSelect: () => applyPreset(name)
+    })));
+    openPopover(fab, 'PREDEFINIÇÕES', items);
+  });
+
+  function applyPreset(name) {
+    const p = presets[name];
+    currentPreset = name;
+    Object.keys(p.values).forEach(key => { controls[key].pos = p.values[key]; manualMode[key] = p.manual[key]; });
+    chipFps.textContent = p.fps;
+    fab.textContent = name === 'CINEMA' ? 'CINEMA' : 'SLOW MO';
+    fab.classList.add('preset-active');
+    refreshUI();
+  }
+
+  function resetToDefault() {
+    currentPreset = null;
+    manualMode = { iso: true, shutter: false, focus: false, wb: false };
+    chipFps.textContent = '30 FPS';
+    fab.textContent = 'PRESET';
+    fab.classList.remove('preset-active');
+    refreshUI();
+  }
+
+  // ---------- Atalho da galeria ----------
+  const galleryInput = document.getElementById('galleryInput');
+  const galleryThumb = document.getElementById('galleryThumb');
+  galleryInput.addEventListener('change', () => {
+    const file = galleryInput.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    galleryThumb.style.backgroundImage = 'url(' + url + ')';
+    galleryThumb.style.backgroundSize = 'cover';
+    galleryThumb.style.backgroundPosition = 'center';
+  });
+
+  // ---------- Inverter câmera (frontal/traseira) ----------
+  const switchCamBtn = document.getElementById('switchCam');
+  switchCamBtn.addEventListener('click', async () => {
+    currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+    zoomLevel = 1; // reseta o zoom ao trocar de câmera (sensores diferentes)
+    const plugin = NativeCamera();
+    if (plugin && plugin.switchCamera) {
+      await plugin.switchCamera({ facing: currentFacingMode });
+    } else {
+      await startCamera(currentQualityConstraints);
+      applyVideoTransform();
+    }
+  });
+
+  // ---------- Zoom ----------
+  let zoomLevel = 1;
+  const zoomButtons = document.querySelectorAll('.zoom-btn');
+
+  function applyVideoTransform() {
+    const mirror = currentFacingMode === 'user' ? -1 : 1;
+    const scale = zoomCapabilities ? 1 : zoomLevel; // se o zoom é real (via sensor), não precisa escalar via CSS
+    video.style.transform = 'scaleX(' + (mirror * scale) + ') scaleY(' + scale + ')';
+  }
+
+  function setZoom(level, silent) {
+    const plugin = NativeCamera();
+    zoomLevel = Math.max(1, Math.min(plugin ? 10 : (zoomCapabilities ? zoomCapabilities.max : 8), level));
+
+    if (plugin && plugin.setZoom) {
+      plugin.setZoom({ level: zoomLevel });
+    } else if (zoomCapabilities && currentTrack) {
+      // Zoom óptico/sensor real, quando o navegador e a câmera permitem
+      currentTrack.applyConstraints({ advanced: [{ zoom: zoomLevel }] }).catch(() => {});
+    }
+    applyVideoTransform();
+
+    if (!silent) {
+      zoomButtons.forEach(b => b.classList.toggle('active', Math.abs(parseFloat(b.dataset.zoom) - zoomLevel) < 0.15));
+    }
+  }
+
+  zoomButtons.forEach(btn => {
+    btn.addEventListener('click', () => setZoom(parseFloat(btn.dataset.zoom)));
+  });
+  setZoom(1);
+
+  // Pinça com dois dedos direto na imagem
+  let pinchStartDist = null;
+  let pinchStartZoom = 1;
+  function touchDistance(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  viewfinderEl.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      pinchStartDist = touchDistance(e.touches);
+      pinchStartZoom = zoomLevel;
+    }
+  }, { passive: true });
+  viewfinderEl.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2 && pinchStartDist) {
+      const dist = touchDistance(e.touches);
+      const factor = dist / pinchStartDist;
+      setZoom(pinchStartZoom * factor);
+      e.preventDefault();
+    }
+  }, { passive: false });
+  viewfinderEl.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) pinchStartDist = null;
+  });
+
+  // ---------- Botão de gravar ----------
+  let recording = false, seconds = 0, timerInterval = null;
+  const recordBtn = document.getElementById('recordBtn');
+  const recTimer = document.getElementById('recTimer');
+  const timerText = document.getElementById('timerText');
+  document.getElementById('recordBtnWrap').addEventListener('click', async () => {
+    recording = !recording;
+    recordBtn.classList.toggle('recording', recording);
+    recTimer.style.display = recording ? 'flex' : 'none';
+
+    const plugin = NativeCamera();
+    if (plugin && plugin.startRecording && plugin.stopRecording) {
+      if (recording) { await plugin.startRecording(); } else { await plugin.stopRecording(); }
+    }
+
+    if (recording) {
+      seconds = 0; timerText.textContent = '00:00:00';
+      timerInterval = setInterval(() => {
+        seconds++;
+        const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
+        const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+        const s = String(seconds % 60).padStart(2, '0');
+        timerText.textContent = `${h}:${m}:${s}`;
+      }, 1000);
+    } else clearInterval(timerInterval);
+  });
+
+  window.addEventListener('resize', refreshUI);
+  refreshUI();
+</script>
+
+</body>
+</html>
