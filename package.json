@@ -1,0 +1,17 @@
+{
+  "name": "cine-manual-a56",
+  "version": "1.0.0",
+  "description": "Cine Manual A56 - câmera com controle manual estilo ProShot para Samsung Galaxy A56",
+  "scripts": {
+    "build": "echo 'Sem build step - www/ já está pronto'",
+    "sync": "npx cap sync android",
+    "open:android": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}
