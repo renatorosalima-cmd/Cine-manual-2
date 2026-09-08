@@ -1,8 +1,8 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.cinemanual.a56',
-  appName: 'Cine Manual A56',
+  appId: 'com.cinemanual.pro',
+  appName: 'Cine Manual Pro',
   webDir: 'www',
   // Fundo transparente: a pré-visualização real da câmera (nativa, por
   // baixo da WebView) precisa aparecer através da interface HTML.
